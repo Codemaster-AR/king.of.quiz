@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Advanced Gemini Quiz Generator with PDF</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js"></script>
+  <style>
+    body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; }
+    .card { background-color: white; border-radius: 1.25rem; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); transition: all 0.3s ease; }
+    .loading-ring {
+      width: 20px; height: 20px; border: 3px solid #fff; border-top-color: transparent; border-radius: 50%;
+      animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-left: 0.5rem;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    input[type="radio"].hidden + label.js-active-source {
+      background-color: white;
+      box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+      color: #4f46e5;
+    }
+    .option-label {
+      transition: all 0.2s;
+      cursor: pointer;
+      padding: 0.5rem 0.75rem;
+      border-radius: 0.75rem;
+      border: 1px solid #e5e7eb;
+      display: block;
+      margin-bottom: 0.5rem;
+    }
+    .option-label:hover { border-color: #a5b4fc; }
+    .correct { background-color: #d1fae5; border-color: #10b981; }
+    .incorrect { background-color: #fee2e2; border-color: #ef4444; }
+    .chat-bubble { max-width: 80%; padding: 0.75rem 1rem; border-radius: 1rem; line-height: 1.4; }
+    .user-message { background-color: #4f46e5; color: white; margin-left: auto; border-bottom-right-radius: 0.25rem; }
+    .ai-message { background-color: #e0e7ff; color: #1e3a8a; margin-right: auto; border-bottom-left-radius: 0.25rem; }
+  </style>
+</head>
+<body class="p-4 sm:p-8 min-h-screen">
+
+  <div id="auth-status" class="text-sm text-center mb-4 text-gray-500">Authenticating...</div>
+
+  <header class="text-center mb-12">
+    <h1 class="text-5xl font-extrabold text-gray-900">AI Quiz Generator ⚡️</h1>
+    <p class="text-gray-500 mt-2 text-lg">Generate customizable quizzes from <b>Topic</b>, <b>Pasted Text</b>, or a <b>PDF</b> document.</p>
+  </header>
+
+  <main class="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <!-- Configuration Panel -->
+    <div id="config-panel" class="card p-6 lg:col-span-1 h-fit sticky top-4">
+      <h2 class="text-xl font-bold mb-5 text-gray-800">Quiz Settings & Content Source</h2>
+      <!-- Input Selection -->
+      <div class="mb-6">
+        <label class="block text-sm font-medium text-gray-700 mb-2">Quiz Content Source</label>
+        <div class="flex rounded-xl bg-gray-100 p-1 space-x-1 border border-gray-200">
+          <input type="radio" id="source-prompt" name="quiz-source" value="prompt" checked class="hidden">
+          <label for="source-prompt" class="flex-1 text-center py-2 px-1 text-sm font-semibold text-gray-600 cursor-pointer rounded-xl transition duration-200 hover:bg-white/70 js-active-source-label">Topic</label>
+          <input type="radio" id="source-text" name="quiz-source" value="text" class="hidden">
+          <label for="source-text" class="flex-1 text-center py-2 px-1 text-sm font-semibold text-gray-600 cursor-pointer rounded-xl transition duration-200 hover:bg-white/70 js-active-source-label">Paste Text</label>
+          <input type="radio" id="source-pdf" name="quiz-source" value="pdf" class="hidden">
+          <label for="source-pdf" class="flex-1 text-center py-2 px-1 text-sm font-semibold text-gray-600 cursor-pointer rounded-xl transition duration-200 hover:bg-white/70 js-active-source-label">PDF Upload</label>
+        </div>
+      </div>
+      <!-- Dynamic Content Input Area -->
+      <div id="input-prompt-container" class="mb-6 transition-all duration-300">
+        <label for="topic" class="block text-sm font-medium text-gray-700 mb-1">Enter a Topic or a Specific Prompt:</label>
+        <input type="text" id="topic" value="The Theory of Relativity" class="w-full p-3 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 transition duration-150" placeholder="e.g., 'Thermodynamics' or 'French Revolution'">
+      </div>
+      <div id="input-text-container" class="mb-6 hidden transition-all duration-300">
+        <label for="pasted-text" class="block text-sm font-medium text-gray-700 mb-1">Paste Text to base questions on (Max ~5000 chars):</label>
+        <textarea id="pasted-text" class="w-full p-3 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500" rows="6" placeholder="Paste your article, document text, or study notes here..."></textarea>
+        <p class="text-xs text-gray-500 mt-1">The AI will use this content exclusively to create the quiz.</p>
+      </div>
+      <div id="input-pdf-container" class="mb-6 hidden transition-all duration-300">
+        <label for="pdf-file" class="block text-sm font-medium text-gray-700 mb-1">Upload PDF File (Max 10MB):</label>
+        <input type="file" id="pdf-file" accept=".pdf" onchange="handlePdfUpload(event)" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
+        <p id="pdf-status" class="text-xs text-gray-500 mt-2">No file selected.</p>
+      </div>
+      <!-- Question Count -->
+      <div class="mb-4">
+        <label for="count" class="block text-sm font-medium text-gray-700 mb-1">Number of Questions (Max 10)</label>
+        <input type="number" id="count" value="5" min="1" max="10" class="w-full p-3 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500">
+      </div>
+      <!-- Question Type -->
+      <div class="mb-6">
+        <label for="type" class="block text-sm font-medium text-gray-700 mb-1">Question Type</label>
+        <select id="type" class="w-full p-3 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500">
+          <option value="mixed">Mixed (MCQ and Open-Ended)</option>
+          <option value="multiple_choice">Multiple Choice Only</option>
+          <option value="open_ended">Open Ended Only</option>
+        </select>
+      </div>
+      <hr class="mb-6 border-gray-200">
+      <!-- Grading and Negative Marking Options -->
+      <h3 class="text-md font-semibold mb-3 text-gray-700">Grading Options</h3>
+      <div class="mb-4">
+        <label class="inline-flex items-center cursor-pointer">
+          <input type="checkbox" id="grading-enabled" checked class="form-checkbox h-5 w-5 text-indigo-600 rounded">
+          <span class="ml-3 text-sm font-medium text-gray-700">Enable Automatic Grading</span>
+        </label>
+      </div>
+      <div id="negative-marking-container" class="mb-6 ml-6 transition-all duration-300">
+        <label class="inline-flex items-center cursor-pointer">
+          <input type="checkbox" id="negative-marking" class="form-checkbox h-5 w-5 text-red-600 rounded">
+          <span class="ml-3 text-sm font-medium text-gray-700">Apply Negative Marking (-25%)</span>
+        </label>
+        <p class="text-xs text-gray-500 mt-1">If enabled, incorrect answers deduct 25% of the question's point value.</p>
+      </div>
+      <!-- Generate Button -->
+      <button id="generate-button" onclick="generateQuiz()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-3 px-4 rounded-xl shadow-lg shadow-indigo-500/50 transition duration-200 disabled:opacity-50 flex items-center justify-center">
+        Generate Quiz
+        <span id="loading-spinner" class="hidden loading-ring"></span>
+      </button>
+    </div>
+    <!-- Quiz Display Panel -->
+    <div class="card p-6 lg:col-span-2">
+      <div id="quiz-title-section" class="mb-6 hidden">
+        <h2 id="quiz-topic-title" class="text-2xl font-bold text-gray-800 mb-1">Generated Quiz</h2>
+        <p id="quiz-status" class="text-sm text-gray-500"></p>
+      </div>
+      <div id="quiz-output" class="space-y-8">
+        <div class="text-center text-gray-500 p-8">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-12 h-12 mx-auto mb-2 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/><path d="m19 19-4 1 1-4"/><path d="M19 19 15 20 16 16 3.5 19.5z"/>
+          </svg>
+          <p>Configure your quiz settings on the left and click 'Generate Quiz' to start.</p>
+        </div>
+      </div>
+      <!-- Quiz Actions (Grade Button) -->
+      <div id="quiz-actions" class="mt-8 pt-4 border-t border-gray-200 hidden flex justify-end">
+        <button id="grade-button" onclick="gradeQuiz()" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-xl shadow-md shadow-green-500/50 transition duration-200 disabled:opacity-50">
+          Submit & Grade Quiz
+        </button>
+      </div>
+      <!-- Chatbot Section for Clarification -->
+      <div id="chatbot-section" class="card p-6 mt-8 hidden">
+        <h2 class="text-xl font-bold mb-5 text-gray-800 flex items-center">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 mr-2 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a9 9 0 0 0-9 9c0 1.5.4 2.9 1.1 4.2l-1.3 4.8 4.8-1.3A9 9 0 1 0 12 2zM12 18h.01"/><path d="M10 13a1 1 0 0 1 2 0v1h-2v-1z"/></svg>
+          Ask the Tutor AI for Clarification
+        </h2>
+        <div id="chat-history" class="h-80 overflow-y-auto p-3 mb-4 border border-gray-200 rounded-xl bg-gray-50 space-y-4">
+          <div class="text-center text-sm text-gray-400 p-8">
+            Ask me about any question you got wrong or any term from the quiz!
+          </div>
+        </div>
+        <div class="flex">
+          <input type="text" id="chat-input" class="flex-grow p-3 border border-gray-300 rounded-l-xl focus:ring-indigo-500 focus:border-indigo-500" placeholder="Ask a question about the quiz...">
+          <button id="chat-send-button" onclick="sendChatQuestion()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-r-xl transition duration-200 disabled:opacity-50">
+            Send
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+  <script>
+    // Gemini API key
+    const apiKey = "AIzaSyAwOX1-HnPBldiOczrqdAbGdjhAcFwG8B4";
+
+    // --- PDF Upload Handler ---
+    async function handlePdfUpload(event) {
+      const file = event.target.files[0];
+      const statusElement = document.getElementById('pdf-status');
+      const pastedTextarea = document.getElementById('pasted-text');
+      pastedTextarea.value = '';
+      if (!file) {
+        statusElement.textContent = 'No file selected.';
+        return;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        statusElement.textContent = 'Error: File size exceeds 10MB limit.';
+        return;
+      }
+      statusElement.innerHTML = `Processing "${file.name}"... <span class="loading-ring ml-2 !w-4 !h-4 !border-white !border-t-indigo-600"></span>`;
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        let fullText = '';
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          fullText += textContent.items.map(item => item.str).join(' ') + '\n\n';
+        }
+        pastedTextarea.value = fullText;
+        const charCount = fullText.length;
+        statusElement.textContent = `Successfully extracted ${charCount} characters from PDF. Ready to generate quiz.`;
+        statusElement.classList.remove('text-red-500');
+        statusElement.classList.add('text-green-600');
+      } catch (error) {
+        console.error("PDF Processing Error:", error);
+        statusElement.textContent = 'Error processing PDF file. Check console for details.';
+        statusElement.classList.remove('text-green-600');
+        statusElement.classList.add('text-red-500');
+        pastedTextarea.value = '';
+      }
+    }
+
+    // --- UI Event Listeners & Input Switching Logic ---
+    document.getElementById('grading-enabled').addEventListener('change', (e) => {
+      const container = document.getElementById('negative-marking-container');
+      if (e.target.checked) {
+        container.classList.remove('opacity-50', 'pointer-events-none');
+      } else {
+        container.classList.add('opacity-50', 'pointer-events-none');
+        document.getElementById('negative-marking').checked = false;
+      }
+    });
+
+    function updateInputMode() {
+      const selectedSource = document.querySelector('input[name="quiz-source"]:checked').value;
+      const promptContainer = document.getElementById('input-prompt-container');
+      const textContainer = document.getElementById('input-text-container');
+      const pdfContainer = document.getElementById('input-pdf-container');
+      document.querySelectorAll('.js-active-source-label').forEach(label => label.classList.remove('js-active-source'));
+      promptContainer.classList.add('hidden');
+      textContainer.classList.add('hidden');
+      pdfContainer.classList.add('hidden');
+      if (selectedSource === 'prompt') {
+        promptContainer.classList.remove('hidden');
+        document.querySelector('label[for="source-prompt"]').classList.add('js-active-source');
+      } else if (selectedSource === 'text') {
+        textContainer.classList.remove('hidden');
+        document.querySelector('label[for="source-text"]').classList.add('js-active-source');
+      } else if (selectedSource === 'pdf') {
+        pdfContainer.classList.remove('hidden');
+        document.querySelector('label[for="source-pdf"]').classList.add('js-active-source');
+      }
+    }
+
+    // --- Exponential Backoff Helper ---
+    const fetchWithBackoff = async (url, options, maxRetries = 5) => {
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          const response = await fetch(url, options);
+          if (response.ok) {
+            return response;
+          } else if (response.status === 429 && attempt < maxRetries - 1) {
+            const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          } else {
+            throw new Error(`API Request failed with status: ${response.status} ${response.statusText}`);
+          }
+        } catch (error) {
+          if (attempt === maxRetries - 1) {
+            throw error;
+          }
+          const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    };
+
+    // --- Quiz Generation Logic (Gemini API) ---
+    let lastQuizData = [];
+    let lastQuizResults = [];
+    async function generateQuiz() {
+      const selectedSource = document.querySelector('input[name="quiz-source"]:checked').value;
+      const count = parseInt(document.getElementById('count').value, 10);
+      const type = document.getElementById('type').value;
+      let topicOrText = '';
+      let userQuery = '';
+      let systemPromptBase = '';
+      if (selectedSource === 'prompt') {
+        topicOrText = document.getElementById('topic').value.trim();
+        if (!topicOrText) {
+          document.getElementById('quiz-output').innerHTML = `<p class="text-red-600 text-center p-4">Please enter a valid Topic or Prompt.</p>`;
+          return;
+        }
+        userQuery = `Generate exactly ${count} quiz questions on the topic: "${topicOrText}".`;
+        systemPromptBase = `You are a world-class educational quiz generator. Your task is to generate a JSON array of quiz questions. You must respond with only valid JSON, no explanations, no markdown, no extra text. Each question should have a "question", and either "options" (array of 4) and "correct_answer" (A/B/C/D), or "correct_answer_text" for open-ended.`;
+      } else if (selectedSource === 'text' || selectedSource === 'pdf') {
+        topicOrText = document.getElementById('pasted-text').value.trim();
+        if (!topicOrText) {
+          document.getElementById('quiz-output').innerHTML = `<p class="text-red-600 text-center p-4">Please provide text content (paste or PDF upload) to base the quiz on.</p>`;
+          return;
+        }
+        const truncatedTextForQuery = topicOrText.substring(0, 500) + (topicOrText.length > 500 ? '...' : '');
+        userQuery = `Generate exactly ${count} quiz questions based ONLY on the following content (first 500 chars shown): "${truncatedTextForQuery}"\n\nFull Content:\n${topicOrText}`;
+        systemPromptBase = `You are a world-class educational quiz generator. Your task is to generate a JSON array of quiz questions. The questions MUST be derived exclusively from the user-provided content. You must respond with only valid JSON, no explanations, no markdown, no extra text. Each question should have a "question", and either "options" (array of 4) and "correct_answer" (A/B/C/D), or "correct_answer_text" for open-ended.`;
+      }
+      const button = document.getElementById('generate-button');
+      const spinner = document.getElementById('loading-spinner');
+      button.disabled = true;
+      spinner.classList.remove('hidden');
+      document.getElementById('quiz-output').innerHTML = `<div class="text-center p-8 text-indigo-600">
+        <p>Generating ${count} questions based on content...</p>
+        <p class="text-sm text-gray-500 mt-2">This may take a moment while the AI creates the structured quiz content.</p>
+      </div>`;
+      document.getElementById('quiz-actions').classList.add('hidden');
+      document.getElementById('quiz-title-section').classList.remove('hidden');
+      document.getElementById('quiz-status').textContent = 'Quiz status: Pending submission.';
+      document.getElementById('chatbot-section').classList.add('hidden');
+      try {
+        let typeInstruction = '';
+        if (type === 'multiple_choice') {
+          typeInstruction = 'Generate only multiple-choice questions with exactly 4 options (A, B, C, D).';
+        } else if (type === 'open_ended') {
+          typeInstruction = 'Generate only open-ended questions. The correct_answer_text should be the concise answer.';
+        } else {
+          typeInstruction = `Generate a mixed quiz, with approximately half multiple-choice (4 options: A, B, C, D) and half open-ended questions.`;
+        }
+        const systemPrompt = `${systemPromptBase}\n${typeInstruction}`;
+        const payload = {
+          contents: [{ parts: [{ text: userQuery }] }],
+          systemInstruction: { parts: [{ text: systemPrompt }] }
+        };
+        const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent";
+        const response = await fetchWithBackoff(`${API_URL}?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const result = await response.json();
+        if (result.candidates && result.candidates.length > 0 && result.candidates[0].content) {
+          const jsonText = result.candidates[0].content.parts[0].text;
+          let generatedQuiz = [];
+          try {
+            generatedQuiz = JSON.parse(jsonText);
+          } catch (e) {
+            document.getElementById('quiz-output').innerHTML = `
+              <p class="text-red-600 text-center p-8">
+                AI response could not be parsed as JSON.<br>
+                <b>Raw AI response:</b>
+                <pre class="bg-gray-100 text-xs p-2 rounded mt-2">${jsonText.replace(/</g, "&lt;")}</pre>
+                <br>Try again or adjust your prompt to require only JSON output.
+              </p>`;
+            return;
+          }
+          if (generatedQuiz.length > 0) {
+            renderQuiz(generatedQuiz, selectedSource === 'prompt' ? topicOrText : 'Custom Content');
+          } else {
+            document.getElementById('quiz-output').innerHTML = `<p class="text-red-600 text-center p-8">The AI generated an empty quiz. Try a different topic or question count.</p>`;
+          }
+        } else {
+          throw new Error(result.error ? result.error.message : 'Unknown API response error.');
+        }
+      } catch (error) {
+        console.error("Quiz Generation Error:", error);
+        document.getElementById('quiz-output').innerHTML = `<p class="text-red-600 text-center p-8">
+          Error generating quiz: ${error.message}. Please check your content source and try again.
+        </p>`;
+      } finally {
+        button.disabled = false;
+        spinner.classList.add('hidden');
+      }
+    }
+
+    // --- Rendering Function (Simple) ---
+    function renderQuiz(quizData, topicLabel) {
+      lastQuizData = quizData;
+      lastQuizResults = [];
+      const outputDiv = document.getElementById('quiz-output');
+      outputDiv.innerHTML = '';
+      quizData.forEach((q, index) => {
+        const qNum = index + 1;
+        let contentHTML = '';
+        if (q.options && Array.isArray(q.options)) {
+          contentHTML = q.options.map((opt, i) => `
+            <label class="option-label">
+              <input type="radio" name="q${qNum}" data-type="mcq" value="${String.fromCharCode(65 + i)}" class="mr-2">
+              <span class="inline-block w-full py-2 px-3 rounded-xl border border-gray-300 transition duration-150 ease-in-out hover:bg-indigo-50">
+                <span class="font-bold text-indigo-600 mr-2">${String.fromCharCode(65 + i)}.</span> ${opt}
+              </span>
+            </label>
+          `).join('');
+        } else {
+          contentHTML = `
+            <textarea name="q${qNum}" data-type="open" class="w-full p-3 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500" rows="3" placeholder="Type your answer here..."></textarea>
+          `;
+        }
+        const questionHTML = `
+          <div id="q-${qNum}" class="p-6 border border-gray-200 rounded-2xl transition duration-300 hover:shadow-lg hover:shadow-gray-100">
+            <p class="text-xl font-semibold mb-4 text-gray-800">
+              ${qNum}. ${q.question}
+            </p>
+            <div class="q-content space-y-2">${contentHTML}</div>
+            <div id="result-q${qNum}" class="mt-4 pt-3 border-t border-dashed border-gray-300 text-sm hidden"></div>
+          </div>
+        `;
+        outputDiv.innerHTML += questionHTML;
+      });
+      document.getElementById('quiz-actions').classList.remove('hidden');
+    }
+
+    // --- Grading Logic (with score display) ---
+    function gradeQuiz() {
+      let score = 0;
+      let total = lastQuizData.length;
+      let negativeMarking = document.getElementById('negative-marking').checked;
+      let gradingEnabled = document.getElementById('grading-enabled').checked;
+      let results = [];
+      lastQuizData.forEach((q, idx) => {
+        const qNum = idx + 1;
+        let correct = false;
+        let userAnswer = "";
+        let correctAnswer = "";
+        let resultDiv = document.getElementById(`result-q${qNum}`);
+        resultDiv.classList.remove('hidden');
+        if (q.options && Array.isArray(q.options)) {
+          // MCQ
+          let selected = document.querySelector(`input[name="q${qNum}"]:checked`);
+          userAnswer = selected ? selected.value : "";
+          correctAnswer = q.correct_answer || q.correct_option || q.answer || "";
+          if (userAnswer && correctAnswer && userAnswer.toUpperCase() === correctAnswer.toUpperCase()) {
+            correct = true;
+            score += 1;
+            resultDiv.innerHTML = `<span class="text-green-600 font-bold">Correct!</span> The answer is <b>${correctAnswer}</b>.`;
+          } else {
+            if (userAnswer && negativeMarking) score -= 0.25;
+            resultDiv.innerHTML = `<span class="text-red-600 font-bold">Incorrect.</span> Your answer: <b>${userAnswer || "None"}</b>. Correct: <b>${correctAnswer}</b>.`;
+          }
+        } else {
+          // Open-ended
+          let textarea = document.querySelector(`textarea[name="q${qNum}"]`);
+          userAnswer = textarea ? textarea.value.trim() : "";
+          correctAnswer = q.correct_answer_text || q.answer || "";
+          if (userAnswer && correctAnswer && gradingEnabled) {
+            // Simple case-insensitive match
+            if (userAnswer.toLowerCase() === correctAnswer.toLowerCase()) {
+              correct = true;
+              score += 1;
+              resultDiv.innerHTML = `<span class="text-green-600 font-bold">Correct!</span>`;
+            } else {
+              if (negativeMarking) score -= 0.25;
+              resultDiv.innerHTML = `<span class="text-red-600 font-bold">Incorrect.</span> Your answer: <b>${userAnswer}</b>. Correct: <b>${correctAnswer}</b>.`;
+            }
+          } else {
+            resultDiv.innerHTML = `<span class="text-gray-600">Submitted: <b>${userAnswer || "None"}</b>. Reference answer: <b>${correctAnswer}</b>.</span>`;
+          }
+        }
+        results.push({ question: q.question, userAnswer, correctAnswer, correct });
+      });
+      if (score < 0) score = 0;
+      document.getElementById('quiz-status').textContent = `Final Score: ${score} / ${total}`;
+      document.getElementById('grade-button').disabled = true;
+      document.getElementById('grade-button').textContent = 'Quiz Submitted';
+      document.getElementById('chatbot-section').classList.remove('hidden');
+      lastQuizResults = results;
+    }
+
+    // --- Tutor Chatbot Logic (Gemini API) ---
+    async function sendChatQuestion() {
+      const inputElement = document.getElementById('chat-input');
+      const sendButton = document.getElementById('chat-send-button');
+      const userQuestion = inputElement.value.trim();
+      if (!userQuestion) return;
+      appendMessage('user', userQuestion);
+      inputElement.value = '';
+      sendButton.disabled = true;
+      inputElement.disabled = true;
+      appendMessage('ai', '<span id="ai-typing-indicator" class="text-sm italic">Tutor AI is thinking...</span>');
+
+      // Compose context from last quiz and answers
+      let context = "";
+      if (lastQuizData && lastQuizResults) {
+        context += "Here are the quiz questions and answers:\n";
+        lastQuizResults.forEach((r, i) => {
+          context += `${i+1}. Q: ${r.question}\nUser Answer: ${r.userAnswer}\nCorrect Answer: ${r.correctAnswer}\n\n`;
+        });
+      }
+      context += `User's follow-up question: ${userQuestion}`;
+
+      // Gemini API call
+      try {
+        const payload = {
+          contents: [{ parts: [{ text: context }] }],
+          systemInstruction: { parts: [{ text: "You are a helpful tutor AI. Answer the user's question about the quiz above. Be concise and clear." }] }
+        };
+        const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent";
+        const response = await fetchWithBackoff(`${API_URL}?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const result = await response.json();
+        document.getElementById('ai-typing-indicator').parentNode.remove();
+        if (result.candidates && result.candidates.length > 0 && result.candidates[0].content) {
+          const aiText = result.candidates[0].content.parts[0].text;
+          appendMessage('ai', aiText);
+        } else {
+          appendMessage('ai', "Sorry, I couldn't generate a response.");
+        }
+      } catch (e) {
+        document.getElementById('ai-typing-indicator').parentNode.remove();
+        appendMessage('ai', "Sorry, there was an error contacting the Tutor AI.");
+      } finally {
+        sendButton.disabled = false;
+        inputElement.disabled = false;
+        inputElement.focus();
+      }
+    }
+
+    function appendMessage(role, text) {
+      const historyDiv = document.getElementById('chat-history');
+      const messageDiv = document.createElement('div');
+      messageDiv.className = `chat-bubble ${role === 'user' ? 'user-message' : 'ai-message'} ${role === 'user' ? 'ml-auto' : 'mr-auto'} `;
+      messageDiv.innerHTML = text.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+      historyDiv.appendChild(messageDiv);
+      historyDiv.scrollTop = historyDiv.scrollHeight;
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      document.querySelectorAll('input[name="quiz-source"]').forEach(input => {
+        input.addEventListener('change', updateInputMode);
+      });
+      updateInputMode();
+      document.getElementById('chat-input').addEventListener('keypress', function (e) {
+        if (e.key === 'Enter' && !document.getElementById('chat-send-button').disabled) {
+          sendChatQuestion();
+        }
+      });
+      document.getElementById('topic').value = "The Theory of Relativity";
+    });
+  </script>
+</body>
+</html>
